@@ -1,7 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-use clap::Parser;
-
 mod file;
 mod gui;
 mod message;
@@ -13,16 +11,9 @@ use eframe::egui;
 use crate::gui::TableGui;
 use crate::config::read_config;
 
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-struct Opt {
-    #[arg(help = "The CSV message file to parse")]
-    file: String,
-}
-
 fn main() {
     let options = eframe::NativeOptions {
-        initial_window_size: Some(egui::vec2(900.0, 800.0)),
+        initial_window_size: Some(egui::vec2(1200.0, 800.0)),
         ..Default::default()
     };
 
