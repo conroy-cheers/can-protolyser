@@ -2,16 +2,16 @@
 
 use clap::Parser;
 
-mod dialog;
 mod file;
 mod gui;
 mod message;
 mod util;
+mod config;
 
 use eframe::egui;
 
 use crate::gui::TableGui;
-use crate::util::read_config;
+use crate::config::read_config;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]

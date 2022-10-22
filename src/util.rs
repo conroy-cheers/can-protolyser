@@ -1,7 +1,3 @@
-use std::fs;
-
-use crate::gui::Config;
-
 pub fn remove_whitespace(s: &mut String) {
     s.retain(|c| !c.is_whitespace());
 }
@@ -17,16 +13,4 @@ pub fn hex_to_str<T: AsRef<[u8]>>(data: T) -> String {
         a
     });
     s.trim_end().to_string()
-}
-
-pub fn write_config(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
-    let file = fs::File::create("config.json")?;
-    serde_json::to_writer(&file, &config)?;
-    Ok(())
-}
-
-pub fn read_config() -> Result<Config, Box<dyn std::error::Error>> {
-    let file = fs::File::open("config.json")?;
-    let config = serde_json::from_reader(&file)?;
-    Ok(config)
 }
