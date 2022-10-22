@@ -31,11 +31,13 @@ impl TableGui {
 
     pub fn save_state(&self) {
         let config = Config::new(
-            self.message_loader.state.file_path().cloned(),
+            self.message_loader.get_file_path().cloned(),
             self.highlight_ids.clone(),
         );
         match write_config(&config) {
-            Ok(_) => {}
+            Ok(_) => {
+                println!("Wrote config");
+            }
             Err(e) => {
                 eprintln!("Error saving config: {}", e);
             }

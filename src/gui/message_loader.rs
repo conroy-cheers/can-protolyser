@@ -28,7 +28,7 @@ pub enum MessageLoaderState {
 }
 
 impl MessageLoaderState {
-    pub fn file_path(&self) -> Option<&PathBuf> {
+    fn file_path(&self) -> Option<&PathBuf> {
         match self {
             MessageLoaderState::FileNotSelected => None,
             MessageLoaderState::FileSelected(file_path) => Some(file_path),
@@ -50,6 +50,10 @@ impl MessageLoader {
         Self {
             state: MessageLoaderState::FileSelected(file_path),
         }
+    }
+
+    pub fn get_file_path(&self) -> Option<&PathBuf> {
+        self.state.file_path()
     }
 
     pub fn replace_file_path(&mut self, file_path: Option<PathBuf>) {
@@ -107,6 +111,7 @@ impl MessageLoader {
                         };
                     }
                     Ok(Some(messages)) => {
+                        // Load succeeded
                         self.state = MessageLoaderState::Loaded {
                             messages,
                             file_path: file_path.clone(),

@@ -26,7 +26,10 @@ impl eframe::App for TableGui {
                 let response = ui.button("Open...");
                 if response.clicked() {
                     match csv_from_dialog() {
-                        Ok(path) => self.message_loader.replace_file_path(path),
+                        Ok(path) => {
+                            self.message_loader.replace_file_path(path);
+                            self.save_state();
+                        }
                         Err(e) => {
                             self.message_loader.set_error(e.to_string());
                         }
