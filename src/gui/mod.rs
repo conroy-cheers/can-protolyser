@@ -3,15 +3,17 @@ mod message_loader;
 mod state;
 mod util;
 
-use eframe::egui::{self, Align, Color32, Layout, ProgressBar, TextEdit};
+use eframe::egui::{self, Align, Color32, ComboBox, Layout, ProgressBar, TextEdit};
 use egui_extras::{Size, StripBuilder, TableBuilder};
+use strum::IntoEnumIterator;
 
+use crate::filter::FilterType;
 use crate::message::{HighlightID, Message};
 use crate::util::hex_to_str;
 
 use dialog::csv_from_dialog;
 use message_loader::{MessageLoader, MessageLoaderState};
-pub use state::TableGui;
+pub(crate) use state::TableGui;
 use util::{ack_color, speed_color};
 
 impl eframe::App for TableGui {
@@ -26,10 +28,11 @@ impl eframe::App for TableGui {
                 let response = ui.button("Open...");
                 if response.clicked() {
                     match csv_from_dialog() {
-                        Ok(path) => {
-                            self.message_loader.replace_file_path(path);
+                        Ok(Some(path)) => {
+                            self.message_loader.replace_file_path(Some(path));
                             self.save_state();
                         }
+                        Ok(None) => {} // User cancelled
                         Err(e) => {
                             self.message_loader.set_error(e.to_string());
                         }
@@ -46,7 +49,7 @@ impl eframe::App for TableGui {
                 .size(Size::exact(10.0)) // for the source code link
                 .vertical(|mut strip| {
                     strip.cell(|ui| {
-                        self.table_ui(ui);
+                        self.messages_ui(ui);
                     });
                 });
         });
@@ -72,8 +75,172 @@ impl TableGui {
                 strip.cell(|ui| {
                     ui.separator();
                 });
-                strip.cell(|_ui| {});
+                strip.cell(|ui| {
+                    self.labels_ui(ui);
+                });
             });
+    }
+
+    fn labels_table_ui(&self, ui: &mut egui::Ui) {
+        let table = TableBuilder::new(ui)
+            .striped(true)
+            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+            .column(Size::initial(70.0).at_least(30.0))
+            .column(Size::initial(50.0).at_least(30.0))
+            .column(Size::initial(50.0).at_least(30.0))
+            .column(Size::remainder());
+
+        table
+            .header(20.0, |mut header| {
+                header.col(|ui| {
+                    ui.heading("Label");
+                });
+                header.col(|ui| {
+                    ui.heading("ID");
+                });
+                header.col(|ui| {
+                    ui.heading("Speed");
+                });
+                header.col(|ui| {
+                    ui.heading("Rule");
+                });
+            })
+            .body(|body| {
+                body.rows(
+                    TableGui::BUTTON_HEIGHT,
+                    self.label_filters.len(),
+                    |row_index, mut row| {
+                        let label_filter = &self.label_filters[row_index];
+                        let filter = &label_filter.filter;
+
+                        row.col(|ui| {
+                            ui.label(&label_filter.label.name);
+                        });
+                        row.col(|ui| {
+                            ui.label(&label_filter.filter.id_string(&self.highlight_ids));
+                        });
+                        row.col(|ui| {
+                            ui.label(&label_filter.filter.speed_string());
+                        });
+                        row.col(|ui| {
+                            ui.label(filter.description());
+                        });
+                        // row.col(|ui| if ui.button("Delete").clicked() {});
+                    },
+                );
+            });
+    }
+
+    fn add_label_ui(&mut self, ui: &mut egui::Ui) {
+        let rule_select_text = &self.add_filter_state.filter_type.name().to_owned();
+
+        ui.horizontal(|ui| {
+            ui.label("Label:");
+            ui.add(
+                TextEdit::singleline(&mut self.add_filter_state.name.value)
+                    .desired_width(80.0)
+                    .text_color_opt(match self.add_filter_state.name.valid {
+                        true => None,
+                        false => Some(Color32::RED),
+                    }),
+            );
+            ui.color_edit_button_rgb(&mut self.add_filter_state.color.value);
+            ui.label("Rule:");
+            ComboBox::from_id_source("add_label_rule")
+                .selected_text(rule_select_text)
+                .show_ui(ui, |ui| {
+                    for rule in FilterType::iter() {
+                        if ui
+                            .selectable_label(
+                                self.add_filter_state.filter_type.is_variant(&rule),
+                                rule.name(),
+                            )
+                            .clicked()
+                        {
+                            self.add_filter_state.filter_type = rule;
+                        }
+                    }
+                });
+        });
+        match &self.add_filter_state.filter_type {
+            FilterType::Basic => {
+                self.basic_filter_edit_line(ui);
+            }
+            FilterType::StartsWithBytes(filter) => {
+                self.basic_filter_edit_line(ui);
+            }
+        }
+
+        if ui.button("Add").clicked() {
+            match self.add_filter_state.validate() {
+                Some(filter) => {
+                    self.label_filters.push(filter);
+                }
+                None => {}
+            }
+        }
+    }
+
+    fn basic_filter_edit_line(&mut self, ui: &mut egui::Ui) {
+        let current_id_data = self.add_filter_state.id.validate_bytes(false);
+
+        ui.horizontal(|ui| {
+            ui.label("ID:");
+            ComboBox::from_id_source("add_label_id")
+                .selected_text(self.add_filter_state.id_text(&self.highlight_ids))
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(self.add_filter_state.id.value.is_empty(), "any")
+                        .clicked()
+                    {
+                        self.add_filter_state.id.value = "".to_string();
+                    }
+                    for h_id in &self.highlight_ids {
+                        if ui
+                            .selectable_label(
+                                current_id_data == Some(h_id.id().clone()),
+                                h_id.name(),
+                            )
+                            .clicked()
+                        {
+                            self.add_filter_state.id.value = hex_to_str(h_id.id());
+                        }
+                    }
+                });
+
+            ui.label("Speed:");
+            ComboBox::from_id_source("add_label_speed")
+                .selected_text(self.add_filter_state.speed_text())
+                .show_ui(ui, |ui| {
+                    for speed in self.message_loader.known_speeds() {
+                        if ui
+                            .selectable_label(
+                                self.add_filter_state.speed.value == speed.clone(),
+                                speed.to_string(),
+                            )
+                            .clicked()
+                        {
+                            self.add_filter_state.speed.value = speed.clone();
+                        }
+                    }
+                });
+        });
+    }
+
+    fn labels_ui(&mut self, ui: &mut egui::Ui) {
+        ui.push_id("labels_ui", |ui| {
+            StripBuilder::new(ui)
+                .size(Size::relative(0.5))
+                .size(Size::relative(0.5))
+                .vertical(|mut strip| {
+                    strip.cell(|ui| {
+                        self.labels_table_ui(ui);
+                    });
+                    strip.cell(|ui| {
+                        self.add_label_ui(ui);
+                    });
+                });
+        });
     }
 
     fn id_config_add_controls(&mut self, ui: &mut egui::Ui) {
@@ -108,11 +275,7 @@ impl TableGui {
                     self.add_highlight_id_state.validate_name(),
                 ) {
                     (Some(id), Some(name)) => {
-                        self.highlight_ids.push(HighlightID {
-                            id,
-                            name,
-                            color: self.add_highlight_id_state.color,
-                        });
+                        self.highlight_ids.push(HighlightID::new(id, name, self.add_highlight_id_state.color));
                         self.add_highlight_id_state.clear();
                         self.save_state();
                     }
@@ -126,58 +289,60 @@ impl TableGui {
     }
 
     fn id_config_table(&mut self, ui: &mut egui::Ui) {
-        ui.vertical(|ui| {
-            let table = TableBuilder::new(ui)
-                .striped(true)
-                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                .column(Size::remainder())
-                .column(Size::remainder())
-                .column(Size::initial(70.0).at_least(30.0))
-                .column(Size::initial(50.0).at_least(30.0));
+        ui.push_id("id_config_table", |ui| {
+            ui.vertical(|ui| {
+                let table = TableBuilder::new(ui)
+                    .striped(true)
+                    .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                    .column(Size::remainder())
+                    .column(Size::remainder())
+                    .column(Size::initial(70.0).at_least(30.0))
+                    .column(Size::initial(50.0).at_least(30.0));
 
-            let mut id_to_remove: Option<usize> = None;
+                let mut id_to_remove: Option<usize> = None;
 
-            table
-                .header(20.0, |mut header| {
-                    header.col(|ui| {
-                        ui.heading("ID");
+                table
+                    .header(20.0, |mut header| {
+                        header.col(|ui| {
+                            ui.heading("ID");
+                        });
+                        header.col(|ui| {
+                            ui.heading("Name");
+                        });
+                        header.col(|ui| {
+                            ui.heading("Colour");
+                        });
+                        header.col(|_ui| {});
+                    })
+                    .body(|body| {
+                        body.rows(
+                            TableGui::BUTTON_HEIGHT,
+                            self.highlight_ids.len(),
+                            |row_index, mut row| {
+                                let msg = &mut self.highlight_ids[row_index];
+                                row.col(|ui| {
+                                    ui.label(hex_to_str(msg.id()));
+                                });
+                                row.col(|ui| {
+                                    ui.label(msg.name());
+                                });
+                                row.col(|ui| {
+                                    color_chip(ui, msg.color32());
+                                });
+                                row.col(|ui| {
+                                    if ui.button("Delete").clicked() {
+                                        id_to_remove = Some(row_index);
+                                    }
+                                });
+                            },
+                        );
                     });
-                    header.col(|ui| {
-                        ui.heading("Name");
-                    });
-                    header.col(|ui| {
-                        ui.heading("Colour");
-                    });
-                    header.col(|_ui| {});
-                })
-                .body(|body| {
-                    body.rows(
-                        TableGui::BUTTON_HEIGHT,
-                        self.highlight_ids.len(),
-                        |row_index, mut row| {
-                            let msg = &mut self.highlight_ids[row_index];
-                            row.col(|ui| {
-                                ui.label(hex_to_str(&msg.id));
-                            });
-                            row.col(|ui| {
-                                ui.label(&msg.name);
-                            });
-                            row.col(|ui| {
-                                ui.color_edit_button_rgb(&mut msg.color);
-                            });
-                            row.col(|ui| {
-                                if ui.button("Delete").clicked() {
-                                    id_to_remove = Some(row_index);
-                                }
-                            });
-                        },
-                    );
-                });
 
-            if id_to_remove != None {
-                self.highlight_ids.remove(id_to_remove.unwrap());
-                self.save_state();
-            }
+                if id_to_remove != None {
+                    self.highlight_ids.remove(id_to_remove.unwrap());
+                    self.save_state();
+                }
+            });
         });
     }
 
@@ -185,7 +350,7 @@ impl TableGui {
         ui.with_layout(Layout::top_down(Align::Center), |ui| {
             ui.add_space(20.0);
             ui.add(
-                ProgressBar::new(self.message_loader.get_loading_progress())
+                ProgressBar::new(self.message_loader.loading_progress())
                     .desired_width(150.0)
                     .animate(true),
             );
@@ -203,8 +368,9 @@ impl TableGui {
             .column(Size::initial(80.0).at_least(40.0))
             .column(Size::initial(160.0).at_least(90.0))
             .columns(Size::initial(40.0).at_least(40.0), 2)
+            .column(Size::initial(50.0).at_least(40.0))
             .column(Size::remainder().at_least(60.0))
-            .resizable(true);
+            .resizable(false);
 
         table
             .header(20.0, |mut header| {
@@ -226,6 +392,9 @@ impl TableGui {
                 header.col(|ui| {
                     ui.heading("Speed");
                 });
+                header.col(|ui| {
+                    ui.heading("Labels");
+                });
             })
             .body(|body| {
                 body.rows(text_height, messages.len(), |row_index, mut row| {
@@ -235,7 +404,7 @@ impl TableGui {
                     });
                     row.col(|ui| match msg.match_id(&self.highlight_ids) {
                         Some(id) => {
-                            ui.colored_label(id.color32(), &id.name);
+                            ui.colored_label(id.color32(), id.name());
                         }
                         None => {
                             ui.label(hex_to_str(&msg.id));
@@ -253,12 +422,15 @@ impl TableGui {
                     row.col(|ui| {
                         ui.colored_label(speed_color(&msg.speed), msg.speed.to_string());
                     });
+                    row.col(|ui| {
+                        ui.label("placeholder");
+                    });
                 });
             });
     }
 
-    fn table_ui(&self, ui: &mut egui::Ui) {
-        match &self.message_loader.state {
+    fn messages_ui(&self, ui: &mut egui::Ui) {
+        match &self.message_loader.state() {
             MessageLoaderState::FileNotSelected => {
                 ui.with_layout(Layout::top_down(Align::Center), |ui| {
                     ui.add_space(20.0);
@@ -295,5 +467,21 @@ impl TableGui {
                 });
             }
         };
+    }
+}
+
+fn color_chip(ui: &mut egui::Ui, color: Color32) {
+    let size = ui.spacing().interact_size;
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+
+    if ui.is_rect_visible(rect) {
+        let visuals = ui.style().interact(&response);
+        let rect = rect.expand(visuals.expansion);
+
+        egui::color_picker::show_color_at(ui.painter(), color, rect);
+
+        let rounding = visuals.rounding.at_most(2.0);
+        ui.painter()
+            .rect_stroke(rect, rounding, (2.0, visuals.bg_fill)); // fill is intentional, because default style has no border
     }
 }

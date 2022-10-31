@@ -1,3 +1,4 @@
+use crate::message::Speed;
 use eframe::egui::Color32;
 
 pub fn ack_color(ack: bool) -> Color32 {
@@ -8,7 +9,7 @@ pub fn ack_color(ack: bool) -> Color32 {
     }
 }
 
-pub fn speed_color(speed: &String) -> Color32 {
+pub fn speed_color(speed: &Speed) -> Color32 {
     match speed.as_str() {
         "1M" => Color32::GREEN,
         "667k" => Color32::YELLOW,

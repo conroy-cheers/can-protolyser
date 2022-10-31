@@ -1,15 +1,17 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
+mod config;
 mod file;
+mod filter;
 mod gui;
+mod label;
 mod message;
 mod util;
-mod config;
 
 use eframe::egui;
 
-use crate::gui::TableGui;
 use crate::config::read_config;
+use crate::gui::TableGui;
 
 fn main() {
     let options = eframe::NativeOptions {

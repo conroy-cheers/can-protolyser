@@ -1,49 +1,6 @@
 use eframe::egui::Color32;
 
-use crate::config::{write_config, Config};
-use crate::gui::{HighlightID, MessageLoader};
-
-pub struct TableGui {
-    pub message_loader: MessageLoader,
-    pub highlight_ids: Vec<HighlightID>,
-    pub add_highlight_id_state: AddHighlightIDState,
-}
-
-impl TableGui {
-    pub fn new() -> Self {
-        Self {
-            message_loader: MessageLoader::new(),
-            highlight_ids: vec![],
-            add_highlight_id_state: AddHighlightIDState::new(),
-        }
-    }
-
-    pub fn from_config(config: Config) -> Self {
-        Self {
-            message_loader: match config.file_path {
-                Some(path) => MessageLoader::from_path(path),
-                None => MessageLoader::new(),
-            },
-            highlight_ids: config.highlight_ids,
-            add_highlight_id_state: AddHighlightIDState::new(),
-        }
-    }
-
-    pub fn save_state(&self) {
-        let config = Config::new(
-            self.message_loader.get_file_path().cloned(),
-            self.highlight_ids.clone(),
-        );
-        match write_config(&config) {
-            Ok(_) => {
-                println!("Wrote config");
-            }
-            Err(e) => {
-                eprintln!("Error saving config: {}", e);
-            }
-        }
-    }
-}
+use crate::message::HighlightID;
 
 pub struct AddHighlightIDState {
     pub id: String,
@@ -107,9 +64,9 @@ impl AddHighlightIDState {
 impl HighlightID {
     pub fn color32(&self) -> Color32 {
         Color32::from_rgb(
-            (self.color[0] * 255.0) as u8,
-            (self.color[1] * 255.0) as u8,
-            (self.color[2] * 255.0) as u8,
+            (self.color()[0] * 255.0) as u8,
+            (self.color()[1] * 255.0) as u8,
+            (self.color()[2] * 255.0) as u8,
         )
     }
 }

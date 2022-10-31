@@ -1,12 +1,14 @@
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::sync::{Arc, Mutex};
 
-use crate::message::Message;
 use crate::file::load_file_async;
+use crate::message::{Message, Speed};
 
 pub struct MessageLoader {
-    pub state: MessageLoaderState,
+    state: MessageLoaderState,
+    known_speeds: HashSet<Speed>
 }
 
 pub enum MessageLoaderState {
@@ -43,16 +45,22 @@ impl MessageLoader {
     pub fn new() -> Self {
         Self {
             state: MessageLoaderState::FileNotSelected,
+            known_speeds: HashSet::new(),
         }
+    }
+
+    pub fn state(&self) -> &MessageLoaderState {
+        &self.state
     }
 
     pub fn from_path(file_path: PathBuf) -> Self {
         Self {
             state: MessageLoaderState::FileSelected(file_path),
+            known_speeds: HashSet::new(),
         }
     }
 
-    pub fn get_file_path(&self) -> Option<&PathBuf> {
+    pub fn file_path(&self) -> Option<&PathBuf> {
         self.state.file_path()
     }
 
@@ -63,12 +71,16 @@ impl MessageLoader {
         }
     }
 
-    pub fn get_loading_progress(&self) -> f32 {
+    pub fn loading_progress(&self) -> f32 {
         match &self.state {
             MessageLoaderState::Loading { progress, .. } => progress.lock().unwrap().clone(),
             MessageLoaderState::Loaded { .. } => 1.0,
             _ => 0.0,
         }
+    }
+
+    pub fn known_speeds(&self) -> &HashSet<Speed> {
+        &self.known_speeds
     }
 
     pub fn set_error(&mut self, error: String) {
@@ -112,6 +124,7 @@ impl MessageLoader {
                     }
                     Ok(Some(messages)) => {
                         // Load succeeded
+                        self.known_speeds = messages.iter().map(|m| m.speed.clone()).collect();
                         self.state = MessageLoaderState::Loaded {
                             messages,
                             file_path: file_path.clone(),
