@@ -13,8 +13,9 @@ use crate::util::hex_to_str;
 
 use dialog::csv_from_dialog;
 use message_loader::{MessageLoader, MessageLoaderState};
-pub(crate) use state::TableGui;
+pub(crate) use state::{TableGui, AddFilterOptionsState};
 use util::{ack_color, speed_color};
+
 
 impl eframe::App for TableGui {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {

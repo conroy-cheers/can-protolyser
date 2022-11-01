@@ -10,11 +10,17 @@ use crate::util::remove_whitespace;
 
 use highlight_id::AddHighlightIDState;
 
-pub use self::filter::AddFilterLabelState;
+pub(crate) use self::filter::{AddFilterLabelState, AddFilterOptionsState};
 
 pub struct Field<T> {
     pub value: T,
     pub valid: bool,
+}
+
+impl<T> Field<T> {
+    pub fn with_value(value: T) -> Self {
+        Self { value, valid: true }
+    }
 }
 
 impl<T> Default for Field<T>
@@ -42,9 +48,7 @@ impl Field<[f32; 3]> {
 impl Field<String> {
     pub fn as_string(&self, allow_empty: bool) -> Option<String> {
         match allow_empty {
-            true => {
-                Some(self.value.clone())
-            }
+            true => Some(self.value.clone()),
             false => {
                 if self.value.is_empty() {
                     None

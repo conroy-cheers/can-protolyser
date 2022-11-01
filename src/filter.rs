@@ -9,7 +9,7 @@ pub trait SpecialFilter {
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Default, Clone)]
 pub struct StartsWithBytes {
-    bytes: Vec<u8>,
+    pub bytes: Vec<u8>,
 }
 
 impl SpecialFilter for StartsWithBytes {
