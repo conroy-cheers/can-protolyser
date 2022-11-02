@@ -3,27 +3,49 @@ mod message_loader;
 mod state;
 mod util;
 
+use std::collections::HashSet;
+
 use eframe::egui::{self, Align, Color32, ComboBox, Layout, ProgressBar, TextEdit};
 use egui_extras::{Size, StripBuilder, TableBuilder};
 use strum::IntoEnumIterator;
 
 use crate::filter::FilterType;
-use crate::message::{HighlightID, Message};
+use crate::message::{id_string, HighlightID, Message};
 use crate::util::hex_to_str;
 
 use dialog::csv_from_dialog;
 use message_loader::{MessageLoader, MessageLoaderState};
-pub(crate) use state::{TableGui, AddFilterOptionsState};
+pub(crate) use state::{AddFilterOptionsState, TableGui};
 use util::{ack_color, speed_color};
 
+use self::state::{Field, FilterLabelEditState};
+
+pub fn id_text(id_field: &Field<String>, ids: &Vec<HighlightID>) -> String {
+    match id_field.as_bytes(true) {
+        None => id_field.value.clone(),
+        Some(id) => id_string(&id, ids),
+    }
+}
+
+pub fn speed_text(speed_field: &Field<String>) -> String {
+    match speed_field.as_string(true) {
+        None => speed_field.value.clone(),
+        Some(speed) => match speed.is_empty() {
+            true => "any".to_string(),
+            false => speed.clone(),
+        },
+    }
+}
 
 impl eframe::App for TableGui {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.message_loader.handle_file_loading();
 
-        egui::SidePanel::left("side_panel").show(ctx, |ui| {
-            self.left_pane_ui(ui);
-        });
+        egui::SidePanel::left("side_panel")
+            .default_width(500.0)
+            .show(ctx, |ui| {
+                self.left_pane_ui(ui);
+            });
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical(|ui| {
                 let response = ui.button("Open...");
@@ -86,9 +108,10 @@ impl TableGui {
         let table = TableBuilder::new(ui)
             .striped(true)
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-            .column(Size::initial(70.0).at_least(30.0))
+            .column(Size::remainder())
             .column(Size::initial(50.0).at_least(30.0))
             .column(Size::initial(50.0).at_least(30.0))
+            .column(Size::remainder())
             .column(Size::remainder());
 
         table
@@ -105,6 +128,7 @@ impl TableGui {
                 header.col(|ui| {
                     ui.heading("Rule");
                 });
+                header.col(|_| {});
             })
             .body(|body| {
                 body.rows(
@@ -118,7 +142,7 @@ impl TableGui {
                             ui.label(&label_filter.label.name);
                         });
                         row.col(|ui| {
-                            ui.label(&label_filter.filter.id_string(&self.highlight_ids));
+                            ui.label(&label_filter.filter.id_string(&self.highlight_id_state.data));
                         });
                         row.col(|ui| {
                             ui.label(&label_filter.filter.speed_string());
@@ -126,26 +150,29 @@ impl TableGui {
                         row.col(|ui| {
                             ui.label(filter.description());
                         });
-                        // row.col(|ui| if ui.button("Delete").clicked() {});
+                        row.col(|ui| {
+                            if ui.button("Edit").clicked() {}
+                            if ui.button("Delete").clicked() {}
+                        });
                     },
                 );
             });
     }
 
     fn add_label_ui(&mut self, ui: &mut egui::Ui) {
-        let rule_select_text = &self.add_filter_state.filter_type.name().to_owned();
+        let rule_select_text = &self.edit_filter_state.filter_type.name().to_owned();
 
         ui.horizontal(|ui| {
             ui.label("Label:");
             ui.add(
-                TextEdit::singleline(&mut self.add_filter_state.name.value)
+                TextEdit::singleline(&mut self.edit_filter_state.name.value)
                     .desired_width(80.0)
-                    .text_color_opt(match self.add_filter_state.name.valid {
+                    .text_color_opt(match self.edit_filter_state.name.valid {
                         true => None,
                         false => Some(Color32::RED),
                     }),
             );
-            ui.color_edit_button_rgb(&mut self.add_filter_state.color.value);
+            ui.color_edit_button_rgb(&mut self.edit_filter_state.color.value);
             ui.label("Rule:");
             ComboBox::from_id_source("add_label_rule")
                 .selected_text(rule_select_text)
@@ -153,50 +180,82 @@ impl TableGui {
                     for rule in FilterType::iter() {
                         if ui
                             .selectable_label(
-                                self.add_filter_state.filter_type.is_variant(&rule),
+                                self.edit_filter_state.filter_type.is_variant(&rule),
                                 rule.name(),
                             )
                             .clicked()
                         {
-                            self.add_filter_state.filter_type = rule;
+                            self.edit_filter_state.filter_options =
+                                AddFilterOptionsState::from_filter_type(&rule);
+                            self.edit_filter_state.filter_type = rule;
                         }
                     }
                 });
         });
-        match &self.add_filter_state.filter_type {
-            FilterType::Basic => {
-                self.basic_filter_edit_line(ui);
+        match (
+            &self.edit_filter_state.filter_type,
+            &mut self.edit_filter_state.filter_options,
+        ) {
+            (FilterType::Basic, AddFilterOptionsState::Empty) => {
+                TableGui::basic_filter_edit_line(
+                    ui,
+                    &mut self.edit_filter_state.id,
+                    &mut self.edit_filter_state.speed,
+                    &self.highlight_id_state.data,
+                    self.message_loader.known_speeds(),
+                );
             }
-            FilterType::StartsWithBytes(filter) => {
-                self.basic_filter_edit_line(ui);
+            (
+                FilterType::StartsWithBytes(_),
+                AddFilterOptionsState::OneStringField(ref mut field),
+            ) => {
+                TableGui::basic_filter_edit_line(
+                    ui,
+                    &mut self.edit_filter_state.id,
+                    &mut self.edit_filter_state.speed,
+                    &self.highlight_id_state.data,
+                    self.message_loader.known_speeds(),
+                );
+                TableGui::one_string_edit_line(ui, &"Starts with".to_string(), field);
             }
+            _ => {}
         }
 
-        if ui.button("Add").clicked() {
-            match self.add_filter_state.validate() {
-                Some(filter) => {
-                    self.label_filters.push(filter);
+        ui.horizontal(|ui| {
+            if ui.button("Add").clicked() {
+                match self.edit_filter_state.validate() {
+                    Some(filter) => {
+                        self.label_filters.push(filter);
+                        self.edit_filter_state = FilterLabelEditState::default();
+                        self.save_state();
+                    }
+                    None => {}
                 }
-                None => {}
             }
-        }
+        });
     }
 
-    fn basic_filter_edit_line(&mut self, ui: &mut egui::Ui) {
-        let current_id_data = self.add_filter_state.id.validate_bytes(false);
+    fn basic_filter_edit_line(
+        ui: &mut egui::Ui,
+        id_field: &mut Field<String>,
+        speed_field: &mut Field<String>,
+        highlight_ids: &Vec<HighlightID>,
+        known_speeds: &HashSet<String>,
+    ) {
+        let current_id_data = id_field.validate_bytes(false);
 
         ui.horizontal(|ui| {
             ui.label("ID:");
             ComboBox::from_id_source("add_label_id")
-                .selected_text(self.add_filter_state.id_text(&self.highlight_ids))
+                .selected_text(id_text(id_field, highlight_ids))
                 .show_ui(ui, |ui| {
                     if ui
-                        .selectable_label(self.add_filter_state.id.value.is_empty(), "any")
+                        .selectable_label(id_field.value.is_empty(), "any")
                         .clicked()
                     {
-                        self.add_filter_state.id.value = "".to_string();
+                        id_field.value = "".to_string();
                     }
-                    for h_id in &self.highlight_ids {
+                    for h_id in highlight_ids {
                         if ui
                             .selectable_label(
                                 current_id_data == Some(h_id.id().clone()),
@@ -204,27 +263,31 @@ impl TableGui {
                             )
                             .clicked()
                         {
-                            self.add_filter_state.id.value = hex_to_str(h_id.id());
+                            id_field.value = hex_to_str(h_id.id());
                         }
                     }
                 });
 
             ui.label("Speed:");
             ComboBox::from_id_source("add_label_speed")
-                .selected_text(self.add_filter_state.speed_text())
+                .selected_text(speed_text(speed_field))
                 .show_ui(ui, |ui| {
-                    for speed in self.message_loader.known_speeds() {
+                    for speed in known_speeds {
                         if ui
-                            .selectable_label(
-                                self.add_filter_state.speed.value == speed.clone(),
-                                speed.to_string(),
-                            )
+                            .selectable_label(speed_field.value == speed.clone(), speed.to_string())
                             .clicked()
                         {
-                            self.add_filter_state.speed.value = speed.clone();
+                            speed_field.value = speed.clone();
                         }
                     }
                 });
+        });
+    }
+
+    fn one_string_edit_line(ui: &mut egui::Ui, label: &String, field: &mut Field<String>) {
+        ui.horizontal(|ui| {
+            ui.label(label);
+            ui.text_edit_singleline(&mut field.value);
         });
     }
 
@@ -248,41 +311,56 @@ impl TableGui {
         ui.horizontal(|ui| {
             ui.label("ID:");
             let id_field = ui.add(
-                TextEdit::singleline(&mut self.add_highlight_id_state.id)
+                TextEdit::singleline(&mut self.highlight_id_state.edit_state.id)
                     .desired_width(80.0)
-                    .text_color_opt(match self.add_highlight_id_state.id_valid {
+                    .text_color_opt(match self.highlight_id_state.edit_state.id_valid {
                         true => None,
                         false => Some(Color32::RED),
                     }),
             );
             ui.label("Name:");
             let name_field = ui.add(
-                TextEdit::singleline(&mut self.add_highlight_id_state.name)
+                TextEdit::singleline(&mut self.highlight_id_state.edit_state.name)
                     .desired_width(70.0)
-                    .text_color_opt(match self.add_highlight_id_state.name_valid {
+                    .text_color_opt(match self.highlight_id_state.edit_state.name_valid {
                         true => None,
                         false => Some(Color32::RED),
                     }),
             );
             if id_field.changed() || name_field.changed() {
-                self.add_highlight_id_state.clear_validation();
+                self.highlight_id_state.edit_state.clear_validation();
             }
 
             ui.label("Color:");
-            ui.color_edit_button_rgb(&mut self.add_highlight_id_state.color);
-            if ui.button("Add").clicked() {
-                match (
-                    self.add_highlight_id_state.validate_id(),
-                    self.add_highlight_id_state.validate_name(),
-                ) {
-                    (Some(id), Some(name)) => {
-                        self.highlight_ids.push(HighlightID::new(id, name, self.add_highlight_id_state.color));
-                        self.add_highlight_id_state.clear();
+            ui.color_edit_button_rgb(&mut self.highlight_id_state.edit_state.color);
+            match &self.highlight_id_state.editing_index() {
+                Some(_) => {
+                    if ui.button("Save").clicked() {
+                        self.highlight_id_state.commit();
                         self.save_state();
                     }
-                    (id_result, name_result) => {
-                        self.add_highlight_id_state.id_valid = id_result.is_some();
-                        self.add_highlight_id_state.name_valid = name_result.is_some();
+                }
+                None => {
+                    if ui.button("Add").clicked() {
+                        match (
+                            self.highlight_id_state.edit_state.validate_id(),
+                            self.highlight_id_state.edit_state.validate_name(),
+                        ) {
+                            (Some(id), Some(name)) => {
+                                self.highlight_id_state.data.push(HighlightID::new(
+                                    id,
+                                    name,
+                                    self.highlight_id_state.edit_state.color,
+                                ));
+                                self.highlight_id_state.edit_state.clear();
+                                self.save_state();
+                            }
+                            (id_result, name_result) => {
+                                self.highlight_id_state.edit_state.id_valid = id_result.is_some();
+                                self.highlight_id_state.edit_state.name_valid =
+                                    name_result.is_some();
+                            }
+                        }
                     }
                 }
             }
@@ -298,7 +376,7 @@ impl TableGui {
                     .column(Size::remainder())
                     .column(Size::remainder())
                     .column(Size::initial(70.0).at_least(30.0))
-                    .column(Size::initial(50.0).at_least(30.0));
+                    .column(Size::exact(110.0));
 
                 let mut id_to_remove: Option<usize> = None;
 
@@ -318,29 +396,57 @@ impl TableGui {
                     .body(|body| {
                         body.rows(
                             TableGui::BUTTON_HEIGHT,
-                            self.highlight_ids.len(),
+                            self.highlight_id_state.data.len(),
                             |row_index, mut row| {
-                                let msg = &mut self.highlight_ids[row_index];
-                                row.col(|ui| {
-                                    ui.label(hex_to_str(msg.id()));
-                                });
-                                row.col(|ui| {
-                                    ui.label(msg.name());
-                                });
-                                row.col(|ui| {
-                                    color_chip(ui, msg.color32());
-                                });
-                                row.col(|ui| {
-                                    if ui.button("Delete").clicked() {
-                                        id_to_remove = Some(row_index);
+                                match *self.highlight_id_state.editing_index() {
+                                    None => {
+                                        // No row being edited
+                                        let msg = &mut self.highlight_id_state.data[row_index];
+                                        row.col(|ui| {
+                                            ui.label(hex_to_str(msg.id()));
+                                        });
+                                        row.col(|ui| {
+                                            ui.label(msg.name());
+                                        });
+                                        row.col(|ui| {
+                                            color_chip(ui, msg.color32());
+                                        });
+                                        row.col(|ui| {
+                                            if ui.button("Edit").clicked() {
+                                                self.highlight_id_state.edit(row_index);
+                                            }
+                                            if ui.button("Delete").clicked() {
+                                                id_to_remove = Some(row_index);
+                                            }
+                                        });
                                     }
-                                });
+                                    i if i == Some(row_index) => {
+                                        // Empty row
+                                        row.col(|ui| {
+                                            ui.label("editing...");
+                                        });
+                                    }
+                                    _ => {
+                                        // Row while another is being edited
+                                        let msg = &mut self.highlight_id_state.data[row_index];
+                                        row.col(|ui| {
+                                            ui.label(hex_to_str(msg.id()));
+                                        });
+                                        row.col(|ui| {
+                                            ui.label(msg.name());
+                                        });
+                                        row.col(|ui| {
+                                            color_chip(ui, msg.color32());
+                                        });
+                                        row.col(|_| {});
+                                    }
+                                }
                             },
                         );
                     });
 
                 if id_to_remove != None {
-                    self.highlight_ids.remove(id_to_remove.unwrap());
+                    self.highlight_id_state.data.remove(id_to_remove.unwrap());
                     self.save_state();
                 }
             });
@@ -403,7 +509,7 @@ impl TableGui {
                     row.col(|ui| {
                         ui.label(std::format!("{:.3}", msg.timestamp));
                     });
-                    row.col(|ui| match msg.match_id(&self.highlight_ids) {
+                    row.col(|ui| match msg.match_id(&self.highlight_id_state.data) {
                         Some(id) => {
                             ui.colored_label(id.color32(), id.name());
                         }

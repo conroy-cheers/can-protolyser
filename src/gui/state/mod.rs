@@ -5,12 +5,11 @@ mod highlight_id;
 
 use crate::config::{write_config, Config};
 use crate::filter::LabelFilter;
-use crate::gui::{HighlightID, MessageLoader};
+use crate::gui::MessageLoader;
 use crate::util::remove_whitespace;
 
-use highlight_id::AddHighlightIDState;
-
-pub(crate) use self::filter::{AddFilterLabelState, AddFilterOptionsState};
+pub(crate) use self::filter::{AddFilterOptionsState, FilterLabelEditState};
+use self::highlight_id::HighlightIDState;
 
 pub struct Field<T> {
     pub value: T,
@@ -112,20 +111,18 @@ impl Field<String> {
 
 pub(crate) struct TableGui {
     pub message_loader: MessageLoader,
-    pub highlight_ids: Vec<HighlightID>,
-    pub add_highlight_id_state: AddHighlightIDState,
+    pub highlight_id_state: HighlightIDState,
     pub label_filters: Vec<LabelFilter>,
-    pub add_filter_state: AddFilterLabelState,
+    pub edit_filter_state: FilterLabelEditState,
 }
 
 impl TableGui {
     pub fn new() -> Self {
         Self {
             message_loader: MessageLoader::new(),
-            highlight_ids: vec![],
-            add_highlight_id_state: AddHighlightIDState::new(),
+            highlight_id_state: HighlightIDState::default(),
             label_filters: vec![],
-            add_filter_state: AddFilterLabelState::new(),
+            edit_filter_state: FilterLabelEditState::new(),
         }
     }
 
@@ -135,17 +132,16 @@ impl TableGui {
                 Some(path) => MessageLoader::from_path(path),
                 None => MessageLoader::new(),
             },
-            highlight_ids: config.highlight_ids,
-            add_highlight_id_state: AddHighlightIDState::new(),
+            highlight_id_state: HighlightIDState::from_data(config.highlight_ids),
             label_filters: config.label_filters,
-            add_filter_state: AddFilterLabelState::new(),
+            edit_filter_state: FilterLabelEditState::new(),
         }
     }
 
     pub fn save_state(&self) {
         let config = Config::new(
             self.message_loader.file_path().cloned(),
-            self.highlight_ids.clone(),
+            self.highlight_id_state.data.clone(),
             self.label_filters.clone(),
         );
         match write_config(&config) {
