@@ -5,7 +5,8 @@ mod util;
 
 use std::collections::HashSet;
 
-use eframe::egui::{self, Align, Color32, ComboBox, Layout, ProgressBar, TextEdit};
+use crate::egui::TextStyle;
+use eframe::egui::{self, Align, Align2, Color32, ComboBox, FontId, Layout, ProgressBar, TextEdit};
 use egui_extras::{Size, StripBuilder, TableBuilder};
 use strum::IntoEnumIterator;
 
@@ -19,6 +20,7 @@ pub(crate) use state::{AddFilterOptionsState, TableGui};
 use util::{ack_color, speed_color};
 
 use self::state::{Field, FilterLabelEditState};
+use self::util::contrasting_text;
 
 pub fn id_text(id_field: &Field<String>, ids: &Vec<HighlightID>) -> String {
     match id_field.as_bytes(true) {
@@ -108,11 +110,11 @@ impl TableGui {
         let table = TableBuilder::new(ui)
             .striped(true)
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-            .column(Size::remainder())
+            .column(Size::relative(0.3))
             .column(Size::initial(50.0).at_least(30.0))
             .column(Size::initial(50.0).at_least(30.0))
             .column(Size::remainder())
-            .column(Size::remainder());
+            .column(Size::exact(100.0));
 
         table
             .header(20.0, |mut header| {
@@ -139,7 +141,11 @@ impl TableGui {
                         let filter = &label_filter.filter;
 
                         row.col(|ui| {
-                            ui.label(&label_filter.label.name);
+                            colored_label(
+                                ui,
+                                label_filter.label.color32(),
+                                &label_filter.label.name,
+                            );
                         });
                         row.col(|ui| {
                             ui.label(&label_filter.filter.id_string(&self.highlight_id_state.data));
@@ -579,13 +585,40 @@ impl TableGui {
 
 fn color_chip(ui: &mut egui::Ui, color: Color32) {
     let size = ui.spacing().interact_size;
-    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::focusable_noninteractive());
 
     if ui.is_rect_visible(rect) {
         let visuals = ui.style().interact(&response);
         let rect = rect.expand(visuals.expansion);
 
         egui::color_picker::show_color_at(ui.painter(), color, rect);
+
+        let rounding = visuals.rounding.at_most(2.0);
+        ui.painter()
+            .rect_stroke(rect, rounding, (2.0, visuals.bg_fill)); // fill is intentional, because default style has no border
+    }
+}
+
+fn colored_label(ui: &mut egui::Ui, color: Color32, text: &String) {
+    let font_id = TextStyle::Body.resolve(ui.style());
+    let size = egui::Vec2 {
+        x: ui.painter().layout(text.to_string(), font_id, Color32::DEBUG_COLOR, 1e5).size().x * 1.1 + 10.0,
+        y: ui.text_style_height(&TextStyle::Body) + 5.0,
+    };
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::focusable_noninteractive());
+
+    if ui.is_rect_visible(rect) {
+        let visuals = ui.style().interact(&response);
+        let rect = rect.expand(visuals.expansion);
+
+        egui::color_picker::show_color_at(ui.painter(), color, rect);
+        ui.painter().text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            text,
+            FontId::default(),
+            contrasting_text(&color),
+        );
 
         let rounding = visuals.rounding.at_most(2.0);
         ui.painter()
