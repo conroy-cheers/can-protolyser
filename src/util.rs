@@ -14,3 +14,17 @@ pub fn hex_to_str<T: AsRef<[u8]>>(data: T) -> String {
     });
     s.trim_end().to_string()
 }
+
+pub fn empty_vec_as_none<T>(vec: Vec<T>) -> Option<Vec<T>> {
+    match vec.is_empty() {
+        true => None,
+        false => Some(vec),
+    }
+}
+
+pub fn empty_str_as_none(s: String) -> Option<String> {
+    match s.is_empty() {
+        true => None,
+        false => Some(s),
+    }
+}

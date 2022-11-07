@@ -1,7 +1,8 @@
 use crate::filter::{FilterType, LabelFilter, MessageFilter, StartsWithBytes};
-use crate::gui::state::Field;
+use crate::gui::state::{Field, ParseError};
 use crate::label::Label;
-use crate::util::hex_to_str;
+use crate::message::Message;
+use crate::util::{hex_to_str, empty_vec_as_none, empty_str_as_none};
 
 #[derive(Default)]
 pub(crate) struct FilterLabelState {
@@ -29,12 +30,20 @@ impl FilterLabelState {
 
     pub(crate) fn commit(&mut self) {
         if let Some(index) = self.editing_index {
-            if let Some(highlight_id) = self.edit_state.validate() {
+            if let Ok(highlight_id) = self.edit_state.validate() {
                 self.data[index] = highlight_id;
                 self.editing_index = None;
                 self.edit_state = EditFilterLabelState::default();
             }
         }
+    }
+
+    pub(crate) fn matching_labels(&self, message: &Message) -> Vec<Label> {
+        self.data
+            .iter()
+            .filter(|lf| lf.filter.filter(message))
+            .map(|lf| lf.label.clone())
+            .collect()
     }
 }
 
@@ -79,9 +88,9 @@ impl EditFilterLabelState {
         }
     }
 
-    pub(crate) fn validate(&mut self) -> Option<LabelFilter> {
-        let id = self.id.validate_bytes(true)?;
-        let speed = self.speed.validate_string(true)?;
+    pub(crate) fn validate(&mut self) -> Result<LabelFilter, ParseError> {
+        let id = empty_vec_as_none(self.id.validate_bytes(true)?);
+        let speed = empty_str_as_none(self.speed.validate_string(true)?);
         let name = self.name.validate_string(false)?;
         let color = self.color.value;
         let filter_type = match (&self.filter_type, &mut self.filter_options) {
@@ -92,11 +101,11 @@ impl EditFilterLabelState {
             ) => FilterType::StartsWithBytes(StartsWithBytes {
                 bytes: field.validate_bytes(false)?,
             }),
-            _ => return None,
+            _ => return Err(ParseError {}),
         };
-        Some(LabelFilter {
+        Ok(LabelFilter {
             label: Label { name, color },
-            filter: MessageFilter::new(Some(id), Some(speed), filter_type),
+            filter: MessageFilter::new(id, speed, filter_type),
         })
     }
 }

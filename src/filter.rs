@@ -1,7 +1,7 @@
 use strum::EnumIter;
 
 use crate::label::Label;
-use crate::message::{HighlightID, Message, Speed, id_string};
+use crate::message::{id_string, HighlightID, Message, Speed};
 
 pub trait SpecialFilter {
     fn filter_specific(&self, message: &Message) -> bool;
@@ -102,20 +102,6 @@ impl Default for FilterType {
 }
 
 impl FilterType {
-    // pub(crate) fn message_filter(&self) -> &dyn SpecialFilter {
-    //     match self {
-    //         FilterType::StartsWithBytes(filter) => filter,
-    //         FilterType::Basic(filter) => filter,
-    //     }
-    // }
-
-    // pub(crate) fn mut_message_filter(&mut self) -> &mut dyn SpecialFilter {
-    //     match self {
-    //         FilterType::StartsWithBytes(filter) => filter,
-    //         FilterType::Basic(filter) => filter,
-    //     }
-    // }
-
     pub(crate) fn is_variant(&self, variant: &FilterType) -> bool {
         match (self, variant) {
             (FilterType::StartsWithBytes(_), FilterType::StartsWithBytes(_)) => true,

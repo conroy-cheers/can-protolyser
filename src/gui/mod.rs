@@ -7,7 +7,6 @@ mod widgets;
 use std::collections::HashSet;
 
 use crate::egui::{self, Align, Color32, ComboBox, Layout, ProgressBar, TextEdit};
-use eframe::App;
 use egui_extras::{Size, StripBuilder, TableBuilder};
 use strum::IntoEnumIterator;
 
@@ -25,15 +24,15 @@ use self::widgets::{color_chip, colored_label};
 
 pub fn id_text(id_field: &Field<String>, ids: &Vec<HighlightID>) -> String {
     match id_field.as_bytes(true) {
-        None => id_field.value.clone(),
-        Some(id) => id_string(&id, ids),
+        Err(_) => id_field.value.clone(),
+        Ok(id_bytes) => id_string(&id_bytes, ids),
     }
 }
 
 pub fn speed_text(speed_field: &Field<String>) -> String {
     match speed_field.as_string(true) {
-        None => speed_field.value.clone(),
-        Some(speed) => match speed.is_empty() {
+        Err(_) => speed_field.value.clone(),
+        Ok(speed) => match speed.is_empty() {
             true => "any".to_string(),
             false => speed.clone(),
         },
@@ -289,12 +288,12 @@ impl TableGui {
             None => {
                 if ui.button("Add").clicked() {
                     match self.filter_label_state.edit_state.validate() {
-                        Some(filter) => {
+                        Ok(filter) => {
                             self.filter_label_state.data.push(filter);
                             self.filter_label_state.edit_state = EditFilterLabelState::default();
                             self.save_state();
                         }
-                        None => {}
+                        Err(_) => {}
                     }
                 }
             }
@@ -324,7 +323,10 @@ impl TableGui {
                     for h_id in highlight_ids {
                         if ui
                             .selectable_label(
-                                current_id_data == Some(h_id.id().clone()),
+                                match current_id_data {
+                                    Ok(ref id_data) => id_data.clone() == h_id.id().clone(),
+                                    Err(_) => false,
+                                },
                                 h_id.name(),
                             )
                             .clicked()
@@ -590,7 +592,12 @@ impl TableGui {
                         ui.colored_label(speed_color(&msg.speed), msg.speed.to_string());
                     });
                     row.col(|ui| {
-                        ui.label("placeholder");
+                        self.filter_label_state
+                            .matching_labels(msg)
+                            .iter()
+                            .for_each(|label| {
+                                colored_label(ui, label.color32(), &label.name);
+                            });
                     });
                 });
             });

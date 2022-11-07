@@ -4,13 +4,15 @@ mod filter;
 mod highlight_id;
 
 use crate::config::{write_config, Config};
-use crate::filter::LabelFilter;
 use crate::gui::MessageLoader;
 use crate::util::remove_whitespace;
 
 use self::filter::FilterLabelState;
-pub(crate) use self::filter::{EditFilterOptionsState, EditFilterLabelState};
+pub(crate) use self::filter::{EditFilterLabelState, EditFilterOptionsState};
 use self::highlight_id::HighlightIDState;
+
+#[derive(Debug, Clone)]
+pub struct ParseError {}
 
 pub struct Field<T> {
     pub value: T,
@@ -46,33 +48,26 @@ impl Field<[f32; 3]> {
 }
 
 impl Field<String> {
-    pub fn as_string(&self, allow_empty: bool) -> Option<String> {
+    pub fn as_string(&self, allow_empty: bool) -> Result<String, ParseError> {
         match allow_empty {
-            true => Some(self.value.clone()),
+            true => Ok(self.value.clone()),
             false => {
                 if self.value.is_empty() {
-                    None
+                    Err(ParseError {})
                 } else {
-                    Some(self.value.clone())
+                    Ok(self.value.clone())
                 }
             }
         }
     }
 
-    pub fn validate_string(&mut self, allow_empty: bool) -> Option<String> {
-        match self.as_string(allow_empty) {
-            None => {
-                self.valid = false;
-                None
-            }
-            Some(value) => {
-                self.valid = true;
-                Some(value)
-            }
-        }
+    pub fn validate_string(&mut self, allow_empty: bool) -> Result<String, ParseError> {
+        let result = self.as_string(allow_empty);
+        self.valid = result.is_ok();
+        result
     }
 
-    pub fn as_bytes(&self, allow_empty: bool) -> Option<Vec<u8>> {
+    pub fn as_bytes(&self, allow_empty: bool) -> Result<Vec<u8>, ParseError> {
         let mut value = self.value.clone();
         remove_whitespace(&mut value);
 
@@ -81,32 +76,20 @@ impl Field<String> {
             false => !value.is_empty(),
         };
         if !length_valid {
-            return None;
+            return Err(ParseError {});
         }
 
         if value.len() % 2 != 0 {
             value.insert(0, '0');
         }
 
-        match hex::decode(&value) {
-            Ok(id) => Some(id),
-            Err(_) => {
-                return None;
-            }
-        }
+        hex::decode(&value).map_err(|_| ParseError {})
     }
 
-    pub fn validate_bytes(&mut self, allow_empty: bool) -> Option<Vec<u8>> {
-        match self.as_bytes(allow_empty) {
-            None => {
-                self.valid = false;
-                None
-            }
-            Some(value) => {
-                self.valid = true;
-                Some(value)
-            }
-        }
+    pub fn validate_bytes(&mut self, allow_empty: bool) -> Result<Vec<u8>, ParseError> {
+        let result = self.as_bytes(allow_empty);
+        self.valid = result.is_ok();
+        result
     }
 }
 
