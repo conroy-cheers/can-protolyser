@@ -8,7 +8,8 @@ use crate::filter::LabelFilter;
 use crate::gui::MessageLoader;
 use crate::util::remove_whitespace;
 
-pub(crate) use self::filter::{AddFilterOptionsState, FilterLabelEditState};
+use self::filter::FilterLabelState;
+pub(crate) use self::filter::{EditFilterOptionsState, EditFilterLabelState};
 use self::highlight_id::HighlightIDState;
 
 pub struct Field<T> {
@@ -112,8 +113,7 @@ impl Field<String> {
 pub(crate) struct TableGui {
     pub message_loader: MessageLoader,
     pub highlight_id_state: HighlightIDState,
-    pub label_filters: Vec<LabelFilter>,
-    pub edit_filter_state: FilterLabelEditState,
+    pub filter_label_state: FilterLabelState,
 }
 
 impl TableGui {
@@ -121,8 +121,7 @@ impl TableGui {
         Self {
             message_loader: MessageLoader::new(),
             highlight_id_state: HighlightIDState::default(),
-            label_filters: vec![],
-            edit_filter_state: FilterLabelEditState::new(),
+            filter_label_state: FilterLabelState::default(),
         }
     }
 
@@ -133,8 +132,7 @@ impl TableGui {
                 None => MessageLoader::new(),
             },
             highlight_id_state: HighlightIDState::from_data(config.highlight_ids),
-            label_filters: config.label_filters,
-            edit_filter_state: FilterLabelEditState::new(),
+            filter_label_state: FilterLabelState::from_data(config.label_filters),
         }
     }
 
@@ -142,7 +140,7 @@ impl TableGui {
         let config = Config::new(
             self.message_loader.file_path().cloned(),
             self.highlight_id_state.data.clone(),
-            self.label_filters.clone(),
+            self.filter_label_state.data.clone(),
         );
         match write_config(&config) {
             Ok(_) => {

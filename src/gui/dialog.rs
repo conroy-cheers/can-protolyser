@@ -17,7 +17,7 @@ impl fmt::Display for DialogError {
     }
 }
 
-pub fn csv_from_dialog() -> Result<Option<PathBuf>, DialogError> {
+pub(crate) fn csv_from_dialog() -> Result<Option<PathBuf>, DialogError> {
     match FileDialog::new()
         .add_filter("CSV", &["csv"])
         .show_open_single_file()

@@ -2,11 +2,12 @@ mod dialog;
 mod message_loader;
 mod state;
 mod util;
+mod widgets;
 
 use std::collections::HashSet;
 
-use crate::egui::TextStyle;
-use eframe::egui::{self, Align, Align2, Color32, ComboBox, FontId, Layout, ProgressBar, TextEdit};
+use crate::egui::{self, Align, Color32, ComboBox, Layout, ProgressBar, TextEdit};
+use eframe::App;
 use egui_extras::{Size, StripBuilder, TableBuilder};
 use strum::IntoEnumIterator;
 
@@ -14,13 +15,13 @@ use crate::filter::FilterType;
 use crate::message::{id_string, HighlightID, Message};
 use crate::util::hex_to_str;
 
-use dialog::csv_from_dialog;
-use message_loader::{MessageLoader, MessageLoaderState};
-pub(crate) use state::{AddFilterOptionsState, TableGui};
-use util::{ack_color, speed_color};
+pub(crate) use state::{EditFilterOptionsState, TableGui};
 
-use self::state::{Field, FilterLabelEditState};
-use self::util::contrasting_text;
+use self::dialog::csv_from_dialog;
+use self::message_loader::{MessageLoader, MessageLoaderState};
+use self::state::{EditFilterLabelState, Field};
+use self::util::{ack_color, speed_color};
+use self::widgets::{color_chip, colored_label};
 
 pub fn id_text(id_field: &Field<String>, ids: &Vec<HighlightID>) -> String {
     match id_field.as_bytes(true) {
@@ -106,7 +107,7 @@ impl TableGui {
             });
     }
 
-    fn labels_table_ui(&self, ui: &mut egui::Ui) {
+    fn labels_table_ui(&mut self, ui: &mut egui::Ui) {
         let table = TableBuilder::new(ui)
             .striped(true)
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
@@ -135,50 +136,98 @@ impl TableGui {
             .body(|body| {
                 body.rows(
                     TableGui::BUTTON_HEIGHT,
-                    self.label_filters.len(),
+                    self.filter_label_state.data.len(),
                     |row_index, mut row| {
-                        let label_filter = &self.label_filters[row_index];
+                        let label_filter = &self.filter_label_state.data[row_index];
                         let filter = &label_filter.filter;
 
-                        row.col(|ui| {
-                            colored_label(
-                                ui,
-                                label_filter.label.color32(),
-                                &label_filter.label.name,
-                            );
-                        });
-                        row.col(|ui| {
-                            ui.label(&label_filter.filter.id_string(&self.highlight_id_state.data));
-                        });
-                        row.col(|ui| {
-                            ui.label(&label_filter.filter.speed_string());
-                        });
-                        row.col(|ui| {
-                            ui.label(filter.description());
-                        });
-                        row.col(|ui| {
-                            if ui.button("Edit").clicked() {}
-                            if ui.button("Delete").clicked() {}
-                        });
+                        match self.filter_label_state.editing_index() {
+                            None => {
+                                // No row being edited
+                                row.col(|ui| {
+                                    colored_label(
+                                        ui,
+                                        label_filter.label.color32(),
+                                        &label_filter.label.name,
+                                    );
+                                });
+                                row.col(|ui| {
+                                    ui.label(
+                                        &label_filter
+                                            .filter
+                                            .id_string(&self.highlight_id_state.data),
+                                    );
+                                });
+                                row.col(|ui| {
+                                    ui.label(&label_filter.filter.speed_string());
+                                });
+                                row.col(|ui| {
+                                    ui.label(filter.description());
+                                });
+                                row.col(|ui| {
+                                    if ui.button("Edit").clicked() {
+                                        self.filter_label_state.edit(row_index);
+                                    }
+                                    if ui.button("Delete").clicked() {
+                                        self.filter_label_state.data.remove(row_index);
+                                        self.save_state();
+                                    }
+                                });
+                            }
+                            Some(editing_index) if *editing_index == row_index => {
+                                // Empty row
+                                row.col(|ui| {
+                                    ui.label("editing...");
+                                });
+                            }
+                            Some(_) => {
+                                // Another row being edited
+                                row.col(|ui| {
+                                    colored_label(
+                                        ui,
+                                        label_filter.label.color32(),
+                                        &label_filter.label.name,
+                                    );
+                                });
+                                row.col(|ui| {
+                                    ui.label(
+                                        &label_filter
+                                            .filter
+                                            .id_string(&self.highlight_id_state.data),
+                                    );
+                                });
+                                row.col(|ui| {
+                                    ui.label(&label_filter.filter.speed_string());
+                                });
+                                row.col(|ui| {
+                                    ui.label(filter.description());
+                                });
+                            }
+                        }
                     },
                 );
             });
     }
 
-    fn add_label_ui(&mut self, ui: &mut egui::Ui) {
-        let rule_select_text = &self.edit_filter_state.filter_type.name().to_owned();
+    fn edit_label_ui(&mut self, ui: &mut egui::Ui) {
+        let rule_select_text = &self
+            .filter_label_state
+            .edit_state
+            .filter_type
+            .name()
+            .to_owned();
 
         ui.horizontal(|ui| {
             ui.label("Label:");
             ui.add(
-                TextEdit::singleline(&mut self.edit_filter_state.name.value)
+                TextEdit::singleline(&mut self.filter_label_state.edit_state.name.value)
                     .desired_width(80.0)
-                    .text_color_opt(match self.edit_filter_state.name.valid {
+                    .text_color_opt(match self.filter_label_state.edit_state.name.valid {
                         true => None,
                         false => Some(Color32::RED),
                     }),
             );
-            ui.color_edit_button_rgb(&mut self.edit_filter_state.color.value);
+            ui.color_edit_button_rgb(&mut self.filter_label_state.edit_state.color.value);
             ui.label("Rule:");
             ComboBox::from_id_source("add_label_rule")
                 .selected_text(rule_select_text)
@@ -186,39 +235,42 @@ impl TableGui {
                     for rule in FilterType::iter() {
                         if ui
                             .selectable_label(
-                                self.edit_filter_state.filter_type.is_variant(&rule),
+                                self.filter_label_state
+                                    .edit_state
+                                    .filter_type
+                                    .is_variant(&rule),
                                 rule.name(),
                             )
                             .clicked()
                         {
-                            self.edit_filter_state.filter_options =
-                                AddFilterOptionsState::from_filter_type(&rule);
-                            self.edit_filter_state.filter_type = rule;
+                            self.filter_label_state.edit_state.filter_options =
+                                EditFilterOptionsState::from_filter_type(&rule);
+                            self.filter_label_state.edit_state.filter_type = rule;
                         }
                     }
                 });
         });
         match (
-            &self.edit_filter_state.filter_type,
-            &mut self.edit_filter_state.filter_options,
+            &self.filter_label_state.edit_state.filter_type,
+            &mut self.filter_label_state.edit_state.filter_options,
         ) {
-            (FilterType::Basic, AddFilterOptionsState::Empty) => {
+            (FilterType::Basic, EditFilterOptionsState::Empty) => {
                 TableGui::basic_filter_edit_line(
                     ui,
-                    &mut self.edit_filter_state.id,
-                    &mut self.edit_filter_state.speed,
+                    &mut self.filter_label_state.edit_state.id,
+                    &mut self.filter_label_state.edit_state.speed,
                     &self.highlight_id_state.data,
                     self.message_loader.known_speeds(),
                 );
             }
             (
                 FilterType::StartsWithBytes(_),
-                AddFilterOptionsState::OneStringField(ref mut field),
+                EditFilterOptionsState::OneStringField(ref mut field),
             ) => {
                 TableGui::basic_filter_edit_line(
                     ui,
-                    &mut self.edit_filter_state.id,
-                    &mut self.edit_filter_state.speed,
+                    &mut self.filter_label_state.edit_state.id,
+                    &mut self.filter_label_state.edit_state.speed,
                     &self.highlight_id_state.data,
                     self.message_loader.known_speeds(),
                 );
@@ -227,15 +279,23 @@ impl TableGui {
             _ => {}
         }
 
-        ui.horizontal(|ui| {
-            if ui.button("Add").clicked() {
-                match self.edit_filter_state.validate() {
-                    Some(filter) => {
-                        self.label_filters.push(filter);
-                        self.edit_filter_state = FilterLabelEditState::default();
-                        self.save_state();
+        ui.horizontal(|ui| match &self.filter_label_state.editing_index() {
+            Some(_) => {
+                if ui.button("Save").clicked() {
+                    self.filter_label_state.commit();
+                    self.save_state();
+                }
+            }
+            None => {
+                if ui.button("Add").clicked() {
+                    match self.filter_label_state.edit_state.validate() {
+                        Some(filter) => {
+                            self.filter_label_state.data.push(filter);
+                            self.filter_label_state.edit_state = EditFilterLabelState::default();
+                            self.save_state();
+                        }
+                        None => {}
                     }
-                    None => {}
                 }
             }
         });
@@ -307,7 +367,7 @@ impl TableGui {
                         self.labels_table_ui(ui);
                     });
                     strip.cell(|ui| {
-                        self.add_label_ui(ui);
+                        self.edit_label_ui(ui);
                     });
                 });
         });
@@ -384,8 +444,6 @@ impl TableGui {
                     .column(Size::initial(70.0).at_least(30.0))
                     .column(Size::exact(110.0));
 
-                let mut id_to_remove: Option<usize> = None;
-
                 table
                     .header(20.0, |mut header| {
                         header.col(|ui| {
@@ -422,7 +480,8 @@ impl TableGui {
                                                 self.highlight_id_state.edit(row_index);
                                             }
                                             if ui.button("Delete").clicked() {
-                                                id_to_remove = Some(row_index);
+                                                self.highlight_id_state.data.remove(row_index);
+                                                self.save_state();
                                             }
                                         });
                                     }
@@ -450,11 +509,6 @@ impl TableGui {
                             },
                         );
                     });
-
-                if id_to_remove != None {
-                    self.highlight_id_state.data.remove(id_to_remove.unwrap());
-                    self.save_state();
-                }
             });
         });
     }
@@ -580,48 +634,5 @@ impl TableGui {
                 });
             }
         };
-    }
-}
-
-fn color_chip(ui: &mut egui::Ui, color: Color32) {
-    let size = ui.spacing().interact_size;
-    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::focusable_noninteractive());
-
-    if ui.is_rect_visible(rect) {
-        let visuals = ui.style().interact(&response);
-        let rect = rect.expand(visuals.expansion);
-
-        egui::color_picker::show_color_at(ui.painter(), color, rect);
-
-        let rounding = visuals.rounding.at_most(2.0);
-        ui.painter()
-            .rect_stroke(rect, rounding, (2.0, visuals.bg_fill)); // fill is intentional, because default style has no border
-    }
-}
-
-fn colored_label(ui: &mut egui::Ui, color: Color32, text: &String) {
-    let font_id = TextStyle::Body.resolve(ui.style());
-    let size = egui::Vec2 {
-        x: ui.painter().layout(text.to_string(), font_id, Color32::DEBUG_COLOR, 1e5).size().x * 1.1 + 10.0,
-        y: ui.text_style_height(&TextStyle::Body) + 5.0,
-    };
-    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::focusable_noninteractive());
-
-    if ui.is_rect_visible(rect) {
-        let visuals = ui.style().interact(&response);
-        let rect = rect.expand(visuals.expansion);
-
-        egui::color_picker::show_color_at(ui.painter(), color, rect);
-        ui.painter().text(
-            rect.center(),
-            Align2::CENTER_CENTER,
-            text,
-            FontId::default(),
-            contrasting_text(&color),
-        );
-
-        let rounding = visuals.rounding.at_most(2.0);
-        ui.painter()
-            .rect_stroke(rect, rounding, (2.0, visuals.bg_fill)); // fill is intentional, because default style has no border
     }
 }
