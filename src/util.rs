@@ -15,6 +15,19 @@ pub fn hex_to_str<T: AsRef<[u8]>>(data: T) -> String {
     s.trim_end().to_string()
 }
 
+// Attempt to decode bytes as ASCII, replacing invalid characters with a _.
+pub fn bytes_to_string(bytes: &[u8]) -> String {
+    let mut s = String::new();
+    for b in bytes {
+        if *b >= 32 && *b <= 126 {
+            s.push(*b as char);
+        } else {
+            s.push('_');
+        }
+    }
+    s
+}
+
 pub fn empty_vec_as_none<T>(vec: Vec<T>) -> Option<Vec<T>> {
     match vec.is_empty() {
         true => None,

@@ -10,9 +10,9 @@ use crate::egui::{self, Align, Color32, ComboBox, Layout, ProgressBar, TextEdit}
 use egui_extras::{Size, StripBuilder, TableBuilder};
 use strum::IntoEnumIterator;
 
-use crate::filter::FilterType;
+use crate::filter::{FilterType, OutputSelection};
 use crate::message::{id_string, HighlightID, Message};
-use crate::util::hex_to_str;
+use crate::util::{bytes_to_string, hex_to_str};
 
 pub(crate) use state::{EditFilterOptionsState, TableGui};
 
@@ -114,7 +114,10 @@ impl TableGui {
             .column(Size::initial(50.0).at_least(30.0))
             .column(Size::initial(50.0).at_least(30.0))
             .column(Size::remainder())
-            .column(Size::exact(100.0));
+            .column(Size::exact(150.0));
+
+        let mut index_to_remove: Option<usize> = None;
+        let mut index_to_copy: Option<usize> = None;
 
         table
             .header(20.0, |mut header| {
@@ -167,9 +170,11 @@ impl TableGui {
                                     if ui.button("Edit").clicked() {
                                         self.filter_label_state.edit(row_index);
                                     }
+                                    if ui.button("Copy").clicked() {
+                                        index_to_copy = Some(row_index);
+                                    }
                                     if ui.button("Delete").clicked() {
-                                        self.filter_label_state.data.remove(row_index);
-                                        self.save_state();
+                                        index_to_remove = Some(row_index);
                                     }
                                 });
                             }
@@ -206,6 +211,19 @@ impl TableGui {
                     },
                 );
             });
+
+        if index_to_remove.is_some() {
+            self.filter_label_state
+                .data
+                .remove(index_to_remove.unwrap());
+            self.save_state();
+        }
+        if index_to_copy.is_some() {
+            let index = index_to_copy.unwrap();
+            let label_filter = self.filter_label_state.data[index].clone();
+            self.filter_label_state.data.insert(index + 1, label_filter);
+            self.save_state();
+        }
     }
 
     fn edit_label_ui(&mut self, ui: &mut egui::Ui) {
@@ -264,7 +282,7 @@ impl TableGui {
             }
             (
                 FilterType::StartsWithBytes(_),
-                EditFilterOptionsState::OneStringField(ref mut field),
+                EditFilterOptionsState::OneStringFieldOneOutputSelection(field, output),
             ) => {
                 TableGui::basic_filter_edit_line(
                     ui,
@@ -274,6 +292,7 @@ impl TableGui {
                     self.message_loader.known_speeds(),
                 );
                 TableGui::one_string_edit_line(ui, &"Starts with".to_string(), field);
+                TableGui::output_selection_edit_line(ui, output);
             }
             _ => {}
         }
@@ -356,6 +375,24 @@ impl TableGui {
         ui.horizontal(|ui| {
             ui.label(label);
             ui.text_edit_singleline(&mut field.value);
+        });
+    }
+
+    fn output_selection_edit_line(ui: &mut egui::Ui, output: &mut OutputSelection) {
+        ui.horizontal(|ui| {
+            ui.label("Output:");
+            ComboBox::from_id_source("add_label_output")
+                .selected_text(output.name())
+                .show_ui(ui, |ui| {
+                    for output_type in OutputSelection::iter() {
+                        if ui
+                            .selectable_label(*output == output_type, output_type.name())
+                            .clicked()
+                        {
+                            *output = output_type;
+                        }
+                    }
+                });
         });
     }
 
@@ -446,6 +483,8 @@ impl TableGui {
                     .column(Size::initial(70.0).at_least(30.0))
                     .column(Size::exact(110.0));
 
+                let mut index_to_remove: Option<usize> = None;
+
                 table
                     .header(20.0, |mut header| {
                         header.col(|ui| {
@@ -482,8 +521,7 @@ impl TableGui {
                                                 self.highlight_id_state.edit(row_index);
                                             }
                                             if ui.button("Delete").clicked() {
-                                                self.highlight_id_state.data.remove(row_index);
-                                                self.save_state();
+                                                index_to_remove = Some(row_index);
                                             }
                                         });
                                     }
@@ -511,6 +549,12 @@ impl TableGui {
                             },
                         );
                     });
+                if index_to_remove.is_some() {
+                    self.highlight_id_state
+                        .data
+                        .remove(index_to_remove.unwrap());
+                    self.save_state();
+                }
             });
         });
     }
@@ -528,14 +572,13 @@ impl TableGui {
     }
 
     fn table_from_messages_ui(&self, ui: &mut egui::Ui, messages: &Vec<Message>) {
-        let text_height = egui::TextStyle::Body.resolve(ui.style()).size;
-
         let table = TableBuilder::new(ui)
             .striped(true)
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
             .column(Size::initial(70.0).at_least(30.0))
             .column(Size::initial(80.0).at_least(40.0))
             .column(Size::initial(160.0).at_least(90.0))
+            .column(Size::initial(80.0).at_least(90.0))
             .columns(Size::initial(40.0).at_least(40.0), 2)
             .column(Size::initial(50.0).at_least(40.0))
             .column(Size::remainder().at_least(60.0))
@@ -553,6 +596,9 @@ impl TableGui {
                     ui.heading("Data");
                 });
                 header.col(|ui| {
+                    ui.heading("Text");
+                });
+                header.col(|ui| {
                     ui.heading("CRC");
                 });
                 header.col(|ui| {
@@ -566,40 +612,62 @@ impl TableGui {
                 });
             })
             .body(|body| {
-                body.rows(text_height, messages.len(), |row_index, mut row| {
-                    let msg = &messages[row_index];
-                    row.col(|ui| {
-                        ui.label(std::format!("{:.3}", msg.timestamp));
-                    });
-                    row.col(|ui| match msg.match_id(&self.highlight_id_state.data) {
-                        Some(id) => {
-                            ui.colored_label(id.color32(), id.name());
-                        }
-                        None => {
-                            ui.label(hex_to_str(&msg.id));
-                        }
-                    });
-                    row.col(|ui| {
-                        ui.label(hex_to_str(&msg.data));
-                    });
-                    row.col(|ui| {
-                        ui.label(hex_to_str(&msg.crc));
-                    });
-                    row.col(|ui| {
-                        ui.colored_label(ack_color(msg.ack), msg.ack.to_string());
-                    });
-                    row.col(|ui| {
-                        ui.colored_label(speed_color(&msg.speed), msg.speed.to_string());
-                    });
-                    row.col(|ui| {
-                        self.filter_label_state
-                            .matching_labels(msg)
-                            .iter()
-                            .for_each(|label| {
-                                colored_label(ui, label.color32(), &label.name);
-                            });
-                    });
-                });
+                body.rows(
+                    TableGui::BUTTON_HEIGHT,
+                    messages.len(),
+                    |row_index, mut row| {
+                        let msg = &messages[row_index];
+                        row.col(|ui| {
+                            ui.label(std::format!("{:.3}", msg.timestamp));
+                        });
+                        row.col(|ui| match msg.match_id(&self.highlight_id_state.data) {
+                            Some(id) => {
+                                ui.colored_label(id.color32(), id.name());
+                            }
+                            None => {
+                                ui.label(hex_to_str(&msg.id));
+                            }
+                        });
+                        row.col(|ui| {
+                            ui.label(hex_to_str(&msg.data));
+                        });
+                        row.col(|ui| {
+                            ui.label(bytes_to_string(&msg.data));
+                        });
+                        row.col(|ui| {
+                            ui.label(hex_to_str(&msg.crc));
+                        });
+                        row.col(|ui| {
+                            ui.colored_label(ack_color(msg.ack), msg.ack.to_string());
+                        });
+                        row.col(|ui| {
+                            ui.colored_label(speed_color(&msg.speed), msg.speed.to_string());
+                        });
+                        row.col(|ui| {
+                            self.filter_label_state
+                                .matching_labels(msg)
+                                .iter()
+                                .for_each(|result| match &result.output {
+                                    Some(data) => {
+                                        colored_label(
+                                            ui,
+                                            result.label.color32(),
+                                            &(result.label.name.clone()
+                                                + ": "
+                                                + &hex_to_str(&data)),
+                                        );
+                                    }
+                                    None => {
+                                        colored_label(
+                                            ui,
+                                            result.label.color32(),
+                                            &result.label.name,
+                                        );
+                                    }
+                                });
+                        });
+                    },
+                );
             });
     }
 

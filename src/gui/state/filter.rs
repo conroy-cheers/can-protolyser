@@ -1,8 +1,10 @@
-use crate::filter::{FilterType, LabelFilter, MessageFilter, StartsWithBytes};
+use crate::filter::{
+    FilterResult, FilterType, LabelFilter, MessageFilter, OutputSelection, StartsWithBytes,
+};
 use crate::gui::state::{Field, ParseError};
 use crate::label::Label;
 use crate::message::Message;
-use crate::util::{hex_to_str, empty_vec_as_none, empty_str_as_none};
+use crate::util::{empty_str_as_none, empty_vec_as_none, hex_to_str};
 
 #[derive(Default)]
 pub(crate) struct FilterLabelState {
@@ -38,11 +40,14 @@ impl FilterLabelState {
         }
     }
 
-    pub(crate) fn matching_labels(&self, message: &Message) -> Vec<Label> {
+    pub(crate) fn matching_labels(&self, message: &Message) -> Vec<FilterResult> {
         self.data
             .iter()
             .filter(|lf| lf.filter.filter(message))
-            .map(|lf| lf.label.clone())
+            .map(|lf| FilterResult {
+                label: lf.label.clone(),
+                output: lf.filter.output_data(message),
+            })
             .collect()
     }
 }
@@ -97,9 +102,10 @@ impl EditFilterLabelState {
             (FilterType::Basic, EditFilterOptionsState::Empty) => FilterType::Basic,
             (
                 FilterType::StartsWithBytes(_),
-                EditFilterOptionsState::OneStringField(ref mut field),
+                EditFilterOptionsState::OneStringFieldOneOutputSelection(field, output),
             ) => FilterType::StartsWithBytes(StartsWithBytes {
                 bytes: field.validate_bytes(false)?,
+                output: output.clone(),
             }),
             _ => return Err(ParseError {}),
         };
@@ -115,14 +121,18 @@ pub(crate) enum EditFilterOptionsState {
     #[default]
     Empty,
     OneStringField(Field<String>),
+    OneStringFieldOneOutputSelection(Field<String>, OutputSelection),
 }
 
 impl EditFilterOptionsState {
     pub(crate) fn from_filter_type(filter_type: &FilterType) -> Self {
         match filter_type {
             FilterType::Basic => Self::Empty,
-            FilterType::StartsWithBytes(StartsWithBytes { bytes }) => {
-                Self::OneStringField(Field::with_value(hex_to_str(bytes)))
+            FilterType::StartsWithBytes(StartsWithBytes { bytes, output }) => {
+                Self::OneStringFieldOneOutputSelection(
+                    Field::with_value(hex_to_str(bytes)),
+                    output.clone(),
+                )
             }
         }
     }

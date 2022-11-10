@@ -5,16 +5,55 @@ use crate::message::{id_string, HighlightID, Message, Speed};
 
 pub trait SpecialFilter {
     fn filter_specific(&self, message: &Message) -> bool;
+
+    fn output_data(&self, _message: &Message) -> Option<Vec<u8>> {
+        None
+    }
+}
+
+#[derive(Debug, EnumIter, PartialEq, serde::Serialize, serde::Deserialize, Default, Clone)]
+pub enum OutputSelection {
+    All,
+    #[default]
+    AfterMatch,
+}
+
+impl OutputSelection {
+    pub(crate) fn name(&self) -> &'static str {
+        match self {
+            OutputSelection::All => "Whole message",
+            OutputSelection::AfterMatch => "After match",
+        }
+    }
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Default, Clone)]
 pub struct StartsWithBytes {
     pub bytes: Vec<u8>,
+    #[serde(default)]
+    pub output: OutputSelection,
 }
 
 impl SpecialFilter for StartsWithBytes {
     fn filter_specific(&self, message: &Message) -> bool {
         message.data.starts_with(&self.bytes)
+    }
+
+    fn output_data(&self, _message: &Message) -> Option<Vec<u8>> {
+        match self.output {
+            OutputSelection::All => Some(_message.data.clone()),
+            OutputSelection::AfterMatch => {
+                if let Some(index) = _message
+                    .data
+                    .windows(self.bytes.len())
+                    .position(|w| w == &self.bytes)
+                {
+                    Some(_message.data[index + self.bytes.len()..].to_vec())
+                } else {
+                    None
+                }
+            }
+        }
     }
 }
 
@@ -69,6 +108,13 @@ impl MessageFilter {
         }
     }
 
+    pub(crate) fn output_data(&self, message: &Message) -> Option<Vec<u8>> {
+        match self.filter_type() {
+            FilterType::Basic => None,
+            FilterType::StartsWithBytes(filter) => filter.output_data(message),
+        }
+    }
+
     pub(crate) fn filter(&self, message: &Message) -> bool {
         if let Some(id) = &self.id {
             if &message.id != id {
@@ -84,7 +130,7 @@ impl MessageFilter {
 
         match &self.filter_type {
             FilterType::Basic => true,
-            FilterType::StartsWithBytes(filter) => message.data.starts_with(&filter.bytes),
+            FilterType::StartsWithBytes(filter) => filter.filter_specific(message),
         }
     }
 }
@@ -122,4 +168,9 @@ impl FilterType {
 pub(crate) struct LabelFilter {
     pub label: Label,
     pub filter: MessageFilter,
+}
+
+pub(crate) struct FilterResult {
+    pub(crate) label: Label,
+    pub(crate) output: Option<Vec<u8>>,
 }
